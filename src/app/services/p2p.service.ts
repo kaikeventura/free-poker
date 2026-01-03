@@ -74,6 +74,11 @@ export class P2pService {
         const savedRevealed = localStorage.getItem('poker_revealed');
         if (savedRevealed) this.revealed.set(savedRevealed === 'true');
       }
+
+      // Cleanup on unload to free Peer ID
+      window.addEventListener('beforeunload', () => {
+        this.peer?.destroy();
+      });
     }
 
     // Auto-save effects
@@ -99,19 +104,14 @@ export class P2pService {
     });
   }
 
-  // Initialize Peer
-  initPeer(id?: string): Promise<string> {
+  // Initialize Peer with Retry Logic
+  initPeer(id?: string, retryCount = 0): Promise<string> {
     return new Promise((resolve, reject) => {
       if (typeof window === 'undefined') {
         reject('Cannot init peer on server');
         return;
       }
 
-      // If an ID is provided, try to use it (Restoring session)
-      // If not, create a new one
-      const peerOptions = id ? undefined : undefined;
-
-      // Note: PeerJS constructor: new Peer([id], [options])
       if (id) {
           this.peer = new Peer(id);
       } else {
@@ -128,10 +128,18 @@ export class P2pService {
         this.handleIncomingConnection(conn);
       });
 
-      this.peer.on('error', (err) => {
+      this.peer.on('error', (err: any) => {
         console.error('Peer error:', err);
-        // If ID is taken (e.g. refresh too fast), we might need to handle it
-        // For now, just reject
+
+        // If ID is taken and we are trying to restore session (id is present)
+        if (err.type === 'unavailable-id' && id && retryCount < 3) {
+            console.log(`ID ${id} is taken. Retrying in 1s... (Attempt ${retryCount + 1})`);
+            setTimeout(() => {
+                this.initPeer(id, retryCount + 1).then(resolve).catch(reject);
+            }, 1000);
+            return;
+        }
+
         reject(err);
       });
 
