@@ -1,6 +1,7 @@
 import { Component, inject, OnInit, effect, computed } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { P2pService } from '../services/p2p.service';
+import { ModalService } from '../services/modal.service';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
@@ -82,17 +83,31 @@ import { FormsModule } from '@angular/forms';
                   <span *ngIf="p.id === p2pService.myPeerId()" class="text-xs text-gray-400">(Você)</span>
                 </div>
 
-                <div class="flex items-center">
+                <div class="flex items-center gap-3">
                   <!-- Status / Vote Display -->
-                  <ng-container *ngIf="p2pService.revealed(); else hiddenVote">
-                     <span class="text-xl font-bold text-blue-600" *ngIf="p.vote !== null && p.vote !== 'HIDDEN'">{{ p.vote }}</span>
-                     <span class="text-sm text-gray-400" *ngIf="p.vote === null">...</span>
-                  </ng-container>
+                  <div class="flex items-center">
+                    <ng-container *ngIf="p2pService.revealed(); else hiddenVote">
+                       <span class="text-xl font-bold text-blue-600" *ngIf="p.vote !== null && p.vote !== 'HIDDEN'">{{ p.vote }}</span>
+                       <span class="text-sm text-gray-400" *ngIf="p.vote === null">...</span>
+                    </ng-container>
 
-                  <ng-template #hiddenVote>
-                    <span *ngIf="p.vote === 'HIDDEN' || (p.vote !== null && p.vote !== undefined)" class="text-green-500 font-bold">✔ Votou</span>
-                    <span *ngIf="p.vote === null || p.vote === undefined" class="text-gray-400 text-sm">Aguardando...</span>
-                  </ng-template>
+                    <ng-template #hiddenVote>
+                      <span *ngIf="p.vote === 'HIDDEN' || (p.vote !== null && p.vote !== undefined)" class="text-green-500 font-bold">✔ Votou</span>
+                      <span *ngIf="p.vote === null || p.vote === undefined" class="text-gray-400 text-sm">Aguardando...</span>
+                    </ng-template>
+                  </div>
+
+                  <!-- Kick Button (Host Only) -->
+                  <button
+                    *ngIf="p2pService.isHost() && p.id !== p2pService.myPeerId()"
+                    (click)="kick(p.id)"
+                    class="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50 transition"
+                    title="Remover participante"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
                 </div>
               </li>
             </ul>
@@ -109,6 +124,7 @@ import { FormsModule } from '@angular/forms';
 })
 export class RoomComponent implements OnInit {
   p2pService = inject(P2pService);
+  private modalService = inject(ModalService);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
 
@@ -154,11 +170,28 @@ export class RoomComponent implements OnInit {
   }
 
   ngOnInit() {
-    this.route.queryParams.subscribe(params => {
+    this.route.queryParams.subscribe(async params => {
       this.hostId = params['hostId'];
       if (!this.hostId) {
         this.router.navigate(['/']);
         return;
+      }
+
+      // Check if I am the host returning from a refresh
+      if (typeof window !== 'undefined') {
+        const savedIsHost = localStorage.getItem('poker_is_host');
+        const savedHostId = localStorage.getItem('poker_host_id');
+
+        if (savedIsHost === 'true' && savedHostId === this.hostId) {
+          // I am the host! Try to restore session
+          try {
+            await this.p2pService.initPeer(savedHostId);
+            // State is already restored in service constructor
+          } catch (err) {
+            console.error('Failed to restore host session', err);
+            this.modalService.alert('Erro', 'Não foi possível restaurar a sessão do Host. O ID pode estar em uso ou expirado.');
+          }
+        }
       }
     });
   }
@@ -171,7 +204,7 @@ export class RoomComponent implements OnInit {
       this.p2pService.connectToHost(this.hostId, this.joinName);
     } catch (err) {
       console.error('Error joining room', err);
-      alert('Erro ao conectar na sala.');
+      this.modalService.alert('Erro', 'Erro ao conectar na sala.');
     }
   }
 
@@ -180,10 +213,17 @@ export class RoomComponent implements OnInit {
     this.p2pService.vote(card);
   }
 
+  async kick(peerId: string) {
+    const confirmed = await this.modalService.confirm('Remover Participante', 'Tem certeza que deseja remover este participante?');
+    if (confirmed) {
+      this.p2pService.kickParticipant(peerId);
+    }
+  }
+
   copyLink() {
     const url = window.location.href;
     navigator.clipboard.writeText(url).then(() => {
-      alert('Link copiado para a área de transferência!');
+      this.modalService.alert('Sucesso', 'Link copiado para a área de transferência!');
     });
   }
 }
