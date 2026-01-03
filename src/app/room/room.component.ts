@@ -210,20 +210,22 @@ export class RoomComponent implements OnInit {
         return;
       }
 
-      // If we are already connected as host, it's a new session, just activate the room.
-      if (this.p2pService.isHost() && this.p2pService.isConnected()) {
+      // Case 1: We are creating a new room and navigating from Home
+      if (this.p2pService.navigatingToNewRoom) {
+        this.p2pService.navigatingToNewRoom = false; // Reset the flag
         this.roomStatus.set('active');
         return;
       }
 
-      // If not connected, check if we should restore a session or join as a client.
+      // Case 2: We are loading the URL directly (refresh or shared link)
       if (typeof window !== 'undefined') {
-        const savedIsHost = localStorage.getItem('poker_is_host');
         const savedHostId = localStorage.getItem('poker_host_id');
 
-        if (savedIsHost === 'true' && savedHostId === this.hostId) {
+        // Sub-case 2a: I am the host reloading the page
+        if (savedHostId === this.hostId) {
           this.restoreHostSession();
         } else {
+        // Sub-case 2b: I am a client joining the room
           this.p2pService.clearHostState();
           this.roomStatus.set('initial');
         }
@@ -234,8 +236,12 @@ export class RoomComponent implements OnInit {
   async restoreHostSession() {
     this.roomStatus.set('restoring');
     try {
-      await this.p2pService.restoreHostSessionFromStorage(this.hostId!);
-      this.roomStatus.set('active');
+      if (this.p2pService.restoreHostSessionFromStorage()) {
+        await this.p2pService.initPeer(this.hostId!);
+        this.roomStatus.set('active');
+      } else {
+        this.roomStatus.set('restore_failed');
+      }
     } catch (err) {
       console.error('Failed to restore host session', err);
       this.roomStatus.set('restore_failed');

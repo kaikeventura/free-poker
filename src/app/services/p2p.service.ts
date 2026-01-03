@@ -47,9 +47,10 @@ export class P2pService {
   readonly customOptions = signal<string[]>([]);
 
   readonly myName = signal<string>('Anonymous');
-
-  // Event for kick notification (to be handled by component/UI)
   readonly kicked = signal<boolean>(false);
+
+  // Simple flag to manage navigation state between components
+  public navigatingToNewRoom = false;
 
   constructor() {
     // Restore only non-session-critical preferences
@@ -73,7 +74,6 @@ export class P2pService {
         localStorage.setItem('poker_system', this.votingSystem());
         localStorage.setItem('poker_options', JSON.stringify(this.customOptions()));
 
-        // Save Host State only if we are the host
         if (this.isHost()) {
             localStorage.setItem('poker_is_host', 'true');
             localStorage.setItem('poker_participants', JSON.stringify(this.participants()));
@@ -86,7 +86,6 @@ export class P2pService {
     });
   }
 
-  // Method to explicitly clear old session data
   clearHostState() {
       if (typeof window !== 'undefined') {
           localStorage.removeItem('poker_is_host');
@@ -99,10 +98,11 @@ export class P2pService {
       this.revealed.set(false);
   }
 
-  restoreHostSessionFromStorage(hostId: string): Promise<string> {
-    if (typeof window === 'undefined') {
-        return Promise.reject('Cannot restore on server');
-    }
+  restoreHostSessionFromStorage(): boolean {
+    if (typeof window === 'undefined') return false;
+
+    const savedIsHost = localStorage.getItem('poker_is_host');
+    if (savedIsHost !== 'true') return false;
 
     const savedParticipants = localStorage.getItem('poker_participants');
     const savedRevealed = localStorage.getItem('poker_revealed');
@@ -115,11 +115,9 @@ export class P2pService {
     }
 
     this.isHost.set(true);
-
-    return this.initPeer(hostId);
+    return true;
   }
 
-  // Initialize Peer with Retry Logic
   initPeer(id?: string, retryCount = 0): Promise<string> {
     return new Promise((resolve, reject) => {
       if (typeof window === 'undefined') {
@@ -147,7 +145,7 @@ export class P2pService {
         console.error('Peer error:', err);
 
         if (err.type === 'unavailable-id' && id && retryCount < 5) {
-            const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff
+            const delay = Math.pow(2, retryCount) * 1000;
             console.log(`ID ${id} is taken. Retrying in ${delay}ms... (Attempt ${retryCount + 1})`);
             setTimeout(() => {
                 this.initPeer(id, retryCount + 1).then(resolve).catch(reject);
@@ -163,8 +161,6 @@ export class P2pService {
       });
     });
   }
-
-  // --- Host Logic ---
 
   startHosting(name: string, system: VotingSystemType = 'fibonacci', options: string[] = []) {
     this.isHost.set(true);
@@ -227,14 +223,12 @@ export class P2pService {
     this.removeParticipant(peerId);
   }
 
-  // --- Client Logic ---
-
   connectToHost(hostId: string, name: string) {
     if (!this.peer) return;
     this.myName.set(name);
     this.isHost.set(false);
     this.kicked.set(false);
-    this.clearHostState(); // Ensure client doesn't have old host data
+    this.clearHostState();
 
     const conn = this.peer.connect(hostId, { reliable: true });
     this.hostConnection = conn;
@@ -260,8 +254,6 @@ export class P2pService {
         console.error('Connection error', err);
     });
   }
-
-  // --- Messaging & State Handling ---
 
   private sendMessage(msg: Message) {
     if (this.isHost()) {
@@ -377,8 +369,6 @@ export class P2pService {
           break;
     }
   }
-
-  // --- Actions ---
 
   vote(value: string | number) {
     if (this.isHost()) {

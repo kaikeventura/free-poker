@@ -89,6 +89,9 @@ export class HomeComponent implements OnInit {
     this.p2pService.clearHostState();
 
     try {
+      // Set flag to indicate we are creating a new room
+      this.p2pService.navigatingToNewRoom = true;
+
       // Initialize a brand new peer connection
       await this.p2pService.initPeer();
 
