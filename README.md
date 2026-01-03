@@ -70,7 +70,6 @@ Pré-requisitos: Node.js instalado.
 2.  Digite seu nome e clique em "Entrar".
 3.  Selecione a carta que representa seu voto.
 4.  Aguarde o Host revelar os resultados.
-
 ---
 
 Desenvolvido com ❤️ usando Angular.
