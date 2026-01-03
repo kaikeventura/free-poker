@@ -1,8 +1,9 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { P2pService, VotingSystemType } from '../services/p2p.service';
 import { FormsModule } from '@angular/forms';
 import { CommonModule } from '@angular/common';
+import { ModalService } from '../services/modal.service';
 
 @Component({
   selector: 'app-home',
@@ -59,13 +60,21 @@ import { CommonModule } from '@angular/common';
     </div>
   `
 })
-export class HomeComponent {
+export class HomeComponent implements OnInit {
   username = '';
   votingSystem: VotingSystemType = 'fibonacci';
   customOptions = '';
 
   private router = inject(Router);
   private p2pService = inject(P2pService);
+  private modalService = inject(ModalService);
+
+  ngOnInit() {
+    // Load preferences from service (which loads from localStorage)
+    this.username = this.p2pService.myName();
+    this.votingSystem = this.p2pService.votingSystem();
+    this.customOptions = this.p2pService.customOptions().join(', ');
+  }
 
   async createSession() {
     if (!this.username) return;
@@ -76,13 +85,21 @@ export class HomeComponent {
       options = this.customOptions.split(',').map(o => o.trim()).filter(o => o);
     }
 
+    // Clean up any old session data before starting a new one
+    this.p2pService.clearHostState();
+
     try {
+      // Initialize a brand new peer connection
       await this.p2pService.initPeer();
+
+      // Start hosting with the new peer ID
       this.p2pService.startHosting(this.username, this.votingSystem, options);
+
+      // Navigate to the room with the new host ID
       this.router.navigate(['/room'], { queryParams: { hostId: this.p2pService.myPeerId() } });
     } catch (err) {
       console.error('Failed to create session', err);
-      alert('Erro ao criar sessão. Verifique o console.');
+      this.modalService.alert('Erro', 'Não foi possível criar a sessão. Verifique o console para mais detalhes.');
     }
   }
 }

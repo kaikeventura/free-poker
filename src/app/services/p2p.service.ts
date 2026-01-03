@@ -52,7 +52,7 @@ export class P2pService {
   readonly kicked = signal<boolean>(false);
 
   constructor() {
-    // PASSO 2.1: Recuperar dados do localStorage no construtor
+    // Restore only non-session-critical preferences
     if (typeof window !== 'undefined') {
       const savedName = localStorage.getItem('poker_name');
       if (savedName) this.myName.set(savedName);
@@ -63,25 +63,17 @@ export class P2pService {
       const savedOptions = localStorage.getItem('poker_options');
       if (savedOptions) this.customOptions.set(JSON.parse(savedOptions));
 
-      const savedIsHost = localStorage.getItem('poker_is_host');
-      if (savedIsHost === 'true') {
-        this.isHost.set(true);
-        const savedParticipants = localStorage.getItem('poker_participants');
-        if (savedParticipants) this.participants.set(JSON.parse(savedParticipants));
-        const savedRevealed = localStorage.getItem('poker_revealed');
-        if (savedRevealed) this.revealed.set(savedRevealed === 'true');
-      }
-
       window.addEventListener('beforeunload', () => this.peer?.destroy());
     }
 
-    // PASSO 2.2: Salvar automaticamente com 'effect'
+    // Auto-save effects
     effect(() => {
       if (typeof window !== 'undefined') {
         localStorage.setItem('poker_name', this.myName());
         localStorage.setItem('poker_system', this.votingSystem());
         localStorage.setItem('poker_options', JSON.stringify(this.customOptions()));
 
+        // Save Host State only if we are the host
         if (this.isHost()) {
             localStorage.setItem('poker_is_host', 'true');
             localStorage.setItem('poker_participants', JSON.stringify(this.participants()));
@@ -92,6 +84,39 @@ export class P2pService {
         }
       }
     });
+  }
+
+  // Method to explicitly clear old session data
+  clearHostState() {
+      if (typeof window !== 'undefined') {
+          localStorage.removeItem('poker_is_host');
+          localStorage.removeItem('poker_host_id');
+          localStorage.removeItem('poker_participants');
+          localStorage.removeItem('poker_revealed');
+      }
+      this.isHost.set(false);
+      this.participants.set([]);
+      this.revealed.set(false);
+  }
+
+  restoreHostSessionFromStorage(hostId: string): Promise<string> {
+    if (typeof window === 'undefined') {
+        return Promise.reject('Cannot restore on server');
+    }
+
+    const savedParticipants = localStorage.getItem('poker_participants');
+    const savedRevealed = localStorage.getItem('poker_revealed');
+
+    if (savedParticipants) {
+        this.participants.set(JSON.parse(savedParticipants));
+    }
+    if (savedRevealed) {
+        this.revealed.set(savedRevealed === 'true');
+    }
+
+    this.isHost.set(true);
+
+    return this.initPeer(hostId);
   }
 
   // Initialize Peer with Retry Logic
@@ -209,10 +234,7 @@ export class P2pService {
     this.myName.set(name);
     this.isHost.set(false);
     this.kicked.set(false);
-
-    if (typeof window !== 'undefined') {
-        localStorage.removeItem('poker_is_host');
-    }
+    this.clearHostState(); // Ensure client doesn't have old host data
 
     const conn = this.peer.connect(hostId, { reliable: true });
     this.hostConnection = conn;

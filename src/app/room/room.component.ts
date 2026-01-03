@@ -149,8 +149,8 @@ type RoomStatus = 'initial' | 'restoring' | 'restore_failed' | 'active';
 export class RoomComponent implements OnInit {
   p2pService = inject(P2pService);
   private modalService = inject(ModalService);
-  private route = inject(ActivatedRoute);
   private router = inject(Router);
+  private route = inject(ActivatedRoute);
 
   roomStatus = signal<RoomStatus>('initial');
   joinName = '';
@@ -192,6 +192,14 @@ export class RoomComponent implements OnInit {
              }
         }
     });
+
+    // Effect to handle being kicked
+    effect(() => {
+      if (this.p2pService.kicked()) {
+        // After the alert, navigate home
+        this.router.navigate(['/']);
+      }
+    });
   }
 
   ngOnInit() {
@@ -202,7 +210,13 @@ export class RoomComponent implements OnInit {
         return;
       }
 
-      // Check if I am the host returning from a refresh
+      // If we are already connected as host, it's a new session, just activate the room.
+      if (this.p2pService.isHost() && this.p2pService.isConnected()) {
+        this.roomStatus.set('active');
+        return;
+      }
+
+      // If not connected, check if we should restore a session or join as a client.
       if (typeof window !== 'undefined') {
         const savedIsHost = localStorage.getItem('poker_is_host');
         const savedHostId = localStorage.getItem('poker_host_id');
@@ -210,7 +224,7 @@ export class RoomComponent implements OnInit {
         if (savedIsHost === 'true' && savedHostId === this.hostId) {
           this.restoreHostSession();
         } else {
-          // I am a client, show login form
+          this.p2pService.clearHostState();
           this.roomStatus.set('initial');
         }
       }
@@ -220,7 +234,7 @@ export class RoomComponent implements OnInit {
   async restoreHostSession() {
     this.roomStatus.set('restoring');
     try {
-      await this.p2pService.initPeer(this.hostId!);
+      await this.p2pService.restoreHostSessionFromStorage(this.hostId!);
       this.roomStatus.set('active');
     } catch (err) {
       console.error('Failed to restore host session', err);
@@ -233,11 +247,7 @@ export class RoomComponent implements OnInit {
   }
 
   startNewSessionAsHost() {
-      // Clear old host data and navigate home to start fresh
-      localStorage.removeItem('poker_is_host');
-      localStorage.removeItem('poker_host_id');
-      localStorage.removeItem('poker_participants');
-      localStorage.removeItem('poker_revealed');
+      this.p2pService.clearHostState();
       this.router.navigate(['/']);
   }
 
