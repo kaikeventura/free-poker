@@ -1,9 +1,11 @@
-import { Component, inject, OnInit, effect, computed } from '@angular/core';
+import { Component, inject, OnInit, effect, computed, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { P2pService } from '../services/p2p.service';
 import { ModalService } from '../services/modal.service';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+
+type RoomStatus = 'initial' | 'restoring' | 'restore_failed' | 'active';
 
 @Component({
   selector: 'app-room',
@@ -27,21 +29,43 @@ import { FormsModule } from '@angular/forms';
         </div>
       </header>
 
-      <!-- Login Overlay if not connected -->
-      <div *ngIf="!p2pService.isConnected() && !p2pService.isHost()" class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50">
-        <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
-          <h2 class="text-2xl font-bold mb-4">Entrar na Sala</h2>
-          <div class="mb-4">
-            <label class="block text-gray-700 text-sm font-bold mb-2">Seu Nome</label>
-            <input type="text" [(ngModel)]="joinName" class="shadow border rounded w-full py-2 px-3">
+      <!-- Overlays -->
+      <ng-container [ngSwitch]="roomStatus()">
+        <!-- Restoring Session Overlay -->
+        <div *ngSwitchCase="'restoring'" class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50">
+          <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-md text-center">
+            <h2 class="text-2xl font-bold mb-4">Restaurando Sessão...</h2>
+            <p class="text-gray-600">Tentando reconectar como Host. Por favor, aguarde.</p>
           </div>
-          <button (click)="joinRoom()" [disabled]="!joinName" class="w-full bg-green-500 text-white font-bold py-2 px-4 rounded hover:bg-green-600 disabled:opacity-50">
-            Entrar
-          </button>
         </div>
-      </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Restore Failed Overlay -->
+        <div *ngSwitchCase="'restore_failed'" class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50">
+          <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-md text-center">
+            <h2 class="text-2xl font-bold mb-4 text-red-600">Falha na Restauração</h2>
+            <p class="text-gray-600 mb-6">Não foi possível reconectar como Host. O ID da sessão pode ter expirado.</p>
+            <button (click)="retryRestore()" class="w-full bg-blue-500 text-white font-bold py-2 px-4 rounded hover:bg-blue-600 mb-3">Tentar Novamente</button>
+            <button (click)="startNewSessionAsHost()" class="w-full bg-gray-500 text-white font-bold py-2 px-4 rounded hover:bg-gray-600">Criar Nova Sessão</button>
+          </div>
+        </div>
+
+        <!-- Login Overlay for new participants -->
+        <div *ngSwitchCase="'initial'" class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50">
+          <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+            <h2 class="text-2xl font-bold mb-4">Entrar na Sala</h2>
+            <div class="mb-4">
+              <label class="block text-gray-700 text-sm font-bold mb-2">Seu Nome</label>
+              <input type="text" [(ngModel)]="joinName" class="shadow border rounded w-full py-2 px-3">
+            </div>
+            <button (click)="joinRoom()" [disabled]="!joinName" class="w-full bg-green-500 text-white font-bold py-2 px-4 rounded hover:bg-green-600 disabled:opacity-50">
+              Entrar
+            </button>
+          </div>
+        </div>
+      </ng-container>
+
+      <!-- Main Content -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6" [class.blur-sm]="roomStatus() !== 'active'">
         <!-- Voting Area -->
         <div class="md:col-span-2">
           <div class="bg-white rounded-lg shadow p-6 mb-6">
@@ -128,6 +152,7 @@ export class RoomComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
 
+  roomStatus = signal<RoomStatus>('initial');
   joinName = '';
   hostId: string | null = null;
   currentVote: string | number | null = null;
@@ -170,7 +195,7 @@ export class RoomComponent implements OnInit {
   }
 
   ngOnInit() {
-    this.route.queryParams.subscribe(async params => {
+    this.route.queryParams.subscribe(params => {
       this.hostId = params['hostId'];
       if (!this.hostId) {
         this.router.navigate(['/']);
@@ -183,17 +208,37 @@ export class RoomComponent implements OnInit {
         const savedHostId = localStorage.getItem('poker_host_id');
 
         if (savedIsHost === 'true' && savedHostId === this.hostId) {
-          // I am the host! Try to restore session
-          try {
-            await this.p2pService.initPeer(savedHostId);
-            // State is already restored in service constructor
-          } catch (err) {
-            console.error('Failed to restore host session', err);
-            this.modalService.alert('Erro', 'Não foi possível restaurar a sessão do Host. O ID pode estar em uso ou expirado.');
-          }
+          this.restoreHostSession();
+        } else {
+          // I am a client, show login form
+          this.roomStatus.set('initial');
         }
       }
     });
+  }
+
+  async restoreHostSession() {
+    this.roomStatus.set('restoring');
+    try {
+      await this.p2pService.initPeer(this.hostId!);
+      this.roomStatus.set('active');
+    } catch (err) {
+      console.error('Failed to restore host session', err);
+      this.roomStatus.set('restore_failed');
+    }
+  }
+
+  retryRestore() {
+      this.restoreHostSession();
+  }
+
+  startNewSessionAsHost() {
+      // Clear old host data and navigate home to start fresh
+      localStorage.removeItem('poker_is_host');
+      localStorage.removeItem('poker_host_id');
+      localStorage.removeItem('poker_participants');
+      localStorage.removeItem('poker_revealed');
+      this.router.navigate(['/']);
   }
 
   async joinRoom() {
@@ -202,6 +247,7 @@ export class RoomComponent implements OnInit {
     try {
       await this.p2pService.initPeer();
       this.p2pService.connectToHost(this.hostId, this.joinName);
+      this.roomStatus.set('active');
     } catch (err) {
       console.error('Error joining room', err);
       this.modalService.alert('Erro', 'Erro ao conectar na sala.');

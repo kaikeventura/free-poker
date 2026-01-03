@@ -132,11 +132,12 @@ export class P2pService {
         console.error('Peer error:', err);
 
         // If ID is taken and we are trying to restore session (id is present)
-        if (err.type === 'unavailable-id' && id && retryCount < 3) {
-            console.log(`ID ${id} is taken. Retrying in 1s... (Attempt ${retryCount + 1})`);
+        if (err.type === 'unavailable-id' && id && retryCount < 5) {
+            const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+            console.log(`ID ${id} is taken. Retrying in ${delay}ms... (Attempt ${retryCount + 1})`);
             setTimeout(() => {
                 this.initPeer(id, retryCount + 1).then(resolve).catch(reject);
-            }, 1000);
+            }, delay);
             return;
         }
 
