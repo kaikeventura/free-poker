@@ -7,7 +7,8 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "serve:ssr:free-poker": "node dist/free-poker/server/server.mjs"
+    "serve:ssr:free-poker": "node dist/free-poker/server/server.mjs",
+    "deploy": "ng build --configuration production && cp dist/free-poker/browser/index.html dist/free-poker/browser/404.html && npx angular-cli-ghpages --dir=dist/free-poker/browser"
   },
   "prettier": {
     "printWidth": 100,
